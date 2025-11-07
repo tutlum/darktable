@@ -1086,3 +1086,100 @@ primaries(read_only image2d_t in,
   opixel.w = ipixel.w;
   write_imagef(out, (int2)(x, y), opixel);
 }
+
+
+/* Deflicker OpenCL kernel - add this to extended.cl */
+
+static inline float calculate_weight_cl(const float pos, 
+                                        const float offset,
+                                        const float period,
+                                        const float width,
+                                        const float feather_start,
+                                        const float feather_end)
+{
+  if(period <= 0.0f || width <= 0.0f) return 0.0f;
+  
+  // Calculate position within the repeating pattern (centered on offset)
+  float phase = fmod(pos - offset + 1000.0f * period, period);
+  if(phase < 0.0f) phase += period;
+  
+  // Distance from band center
+  float dist_from_center = phase - period * 0.5f;
+  if(dist_from_center < 0.0f) dist_from_center += period;
+  if(dist_from_center > period * 0.5f) dist_from_center -= period;
+  dist_from_center = fabs(dist_from_center);
+  
+  // Calculate weight based on distance from center
+  float weight = 0.0f;
+  const float half_width = width * 0.5f;
+  
+  if(dist_from_center <= half_width)
+  {
+    // Inside the full correction zone
+    weight = 1.0f;
+  }
+  else if(dist_from_center <= half_width + feather_start && dist_from_center > half_width)
+  {
+    // In the feathering zone (symmetric on both sides)
+    const float feather_dist = dist_from_center - half_width;
+    const float avg_feather = (feather_start + feather_end) * 0.5f;
+    weight = (avg_feather > 0.0f) ? (1.0f - feather_dist / avg_feather) : 1.0f;
+  }
+  
+  return clamp(weight, 0.0f, 1.0f);
+}
+
+kernel void deflicker(
+  read_only image2d_t in,
+  write_only image2d_t out,
+  const int width,
+  const int height,
+  const int orientation,
+  const float offset_px,
+  const float period_px,
+  const float width_px,
+  const float feather_start_px,
+  const float feather_end_px,
+  const float brightness_mult,
+  const int invert,
+  const int unbound,
+  const float scale,
+  const int roi_x,
+  const int roi_y)
+{
+  const int x = get_global_id(0);
+  const int y = get_global_id(1);
+
+  if(x >= width || y >= height) return;
+
+  // Calculate position in full image coordinates
+  const float global_i = (x + roi_x) / scale;
+  const float global_j = (y + roi_y) / scale;
+  
+  // Determine position along band direction
+  const float pos = (orientation == 0) ? global_j : global_i;
+  
+  // Calculate correction weight
+  float weight = calculate_weight_cl(pos, offset_px, period_px, width_px,
+                                    feather_start_px, feather_end_px);
+  
+  if(invert) weight = 1.0f - weight;
+  
+  // Read input pixel
+  float4 pixel = read_imagef(in, sampleri, (int2)(x, y));
+  
+  // Apply correction
+  if(weight > 0.0f)
+  {
+    const float correction = 1.0f + weight * (brightness_mult - 1.0f);
+    
+    pixel.xyz *= correction;
+    
+    if(!unbound)
+    {
+      pixel.xyz = clamp(pixel.xyz, 0.0f, 1.0f);
+    }
+  }
+  
+  write_imagef(out, (int2)(x, y), pixel);
+}
