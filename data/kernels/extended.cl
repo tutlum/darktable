@@ -1107,23 +1107,26 @@ static inline float calculate_weight_cl(const float pos,
   float dist_from_center = phase;
   if(dist_from_center < 0.0f) dist_from_center += period;
   if(dist_from_center > period * 0.5f) dist_from_center -= period;
-  dist_from_center = fabs(dist_from_center);
   
-  // Calculate weight based on distance from center
-  float weight = 0.0f;
   const float half_width = width * 0.5f;
+  const float abs_dist = fabs(dist_from_center);
   
-  if(dist_from_center <= half_width)
+  // Determine which side
+  const int before_center = (dist_from_center < 0.0f);
+  const float feather = before_center ? feather_start : feather_end;
+  
+  float weight = 0.0f;
+  
+  if(abs_dist <= half_width)
   {
     // Inside the full correction zone
     weight = 1.0f;
   }
-  else if(dist_from_center <= half_width + feather_start && dist_from_center > half_width)
+  else if(abs_dist <= half_width + feather && feather > 0.0f)
   {
-    // In the feathering zone (symmetric on both sides)
-    const float feather_dist = dist_from_center - half_width;
-    const float avg_feather = (feather_start + feather_end) * 0.5f;
-    weight = (avg_feather > 0.0f) ? (1.0f - feather_dist / avg_feather) : 1.0f;
+    const float feather_pos = abs_dist - half_width;
+    const float t = feather_pos / feather;
+    weight = 0.5f * (1.0f + cos(t * M_PI));  // Cosine falloff
   }
   
   return clamp(weight, 0.0f, 1.0f);

@@ -143,34 +143,32 @@ static inline float calculate_weight(const float pos,
   float phase = fmodf(pos - offset + 1000.0f * period, period);
   if(phase < 0.0f) phase += period;
   
-  // Shift phase so that 0 is at the start of the band (not the center)
   // Band structure: [feather_start][width/2][CENTER][width/2][feather_end]
-  const float half_width = width * 0.5f;
-  //const float band_start = period * 0.5f - half_width - feather_start;
-  //const float band_end = period * 0.5f + half_width + feather_end;
-  
   // Distance from band center
   float dist_from_center = phase;
   if(dist_from_center < 0.0f) dist_from_center += period;
   if(dist_from_center > period * 0.5f) dist_from_center -= period;
-  dist_from_center = fabsf(dist_from_center);
   
-  // Calculate weight based on distance from center
+  const float half_width = width * 0.5f;
+  const float abs_dist = fabsf(dist_from_center);
+  
+  // Determine which side of center we're on
+  const gboolean before_center = (dist_from_center < 0.0f);
+  const float feather = before_center ? feather_start : feather_end;
+  
   float weight = 0.0f;
   
-  if(dist_from_center <= half_width)
+  if(abs_dist <= half_width)
   {
     // Inside the full correction zone
     weight = 1.0f;
   }
-  else if(dist_from_center <= half_width + feather_start && dist_from_center > half_width)
+  else if(abs_dist <= half_width + feather && feather > 0.0f)
   {
-    // In the feathering zone (same feathering on both sides for now, can be made asymmetric)
-    const float feather_dist = dist_from_center - half_width;
-    // Use feather_start for one side, feather_end for the other
-    // For now, use average feathering on both sides
-    const float avg_feather = (feather_start + feather_end) * 0.5f;
-    weight = (avg_feather > 0.0f) ? (1.0f - feather_dist / avg_feather) : 1.0f;
+    // In feathering zone - use cosine falloff
+    const float feather_pos = abs_dist - half_width;
+    const float t = feather_pos / feather;  // 0 to 1
+    weight = 0.5f * (1.0f + cosf(t * M_PI));  // Smooth cosine falloff
   }
   
   return CLAMP(weight, 0.0f, 1.0f);
@@ -371,9 +369,9 @@ void gui_post_expose(dt_iop_module_t *self,
     const float half_width = width_display * 0.5f;
     const float band_inner_start = band_center - half_width;
     const float band_inner_end = band_center + half_width;
-    const float avg_feather = (feather_start_display + feather_end_display) * 0.5f;
-    const float band_outer_start = band_inner_start - avg_feather;
-    const float band_outer_end = band_inner_end + avg_feather;
+    // const float avg_feather = (feather_start_display + feather_end_display) * 0.5f;
+    const float band_outer_start = band_inner_start - feather_start_display;
+    const float band_outer_end = band_inner_end + feather_end_display;
     
     if(band_outer_start > display_dimension) break;
     if(band_outer_end < 0) continue;
@@ -653,14 +651,14 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_digits(g->feather_start, 1);
   dt_bauhaus_slider_set_step(g->feather_start, 1.0);
   gtk_widget_set_tooltip_text(g->feather_start, 
-    _("feathering extends outward from band edges\nsymmetric on both sides"));
+    _("feathering on leading edge (before center)\ncosine falloff for smooth transition"));
   
   g->feather_end = dt_bauhaus_slider_from_params(self, "feather_end");
   dt_bauhaus_slider_set_format(g->feather_end, " px");
   dt_bauhaus_slider_set_digits(g->feather_end, 1);
   dt_bauhaus_slider_set_step(g->feather_end, 1.0);
   gtk_widget_set_tooltip_text(g->feather_end, 
-    _("averaged with feather start for symmetric blending"));
+    _("feathering on trailing edge (after center)\ncosine falloff for smooth transition"));
   
   gtk_box_pack_start(GTK_BOX(self->widget),
                      dt_ui_section_label_new(C_("section", "correction")),
