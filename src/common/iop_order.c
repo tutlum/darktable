@@ -436,7 +436,6 @@ const dt_iop_order_entry_t v30_jpg_order[] = {
   { { 28.0f }, "bilateral", 0},
   { { 28.0f }, "rotatepixels", 0},
   { { 28.0f }, "scalepixels", 0},
-  { { 28.5f }, "deflicker", 0},
   { { 28.0f }, "lens", 0},
   { { 28.0f }, "cacorrectrgb", 0}, // correct chromatic aberrations after lens correction so that lensfun
                                   // does not reintroduce chromatic aberrations when trying to correct them
@@ -467,6 +466,7 @@ const dt_iop_order_entry_t v30_jpg_order[] = {
   { { 28.5f }, "primaries", 0},
   { { 29.0f }, "nlmeans", 0 },      // signal processing (denoising)
                                     //    -> needs a signal as scene-referred as possible (even if it works in Lab)
+  { { 29.5f }, "deflicker", 0},
   { { 30.0f }, "colorchecker", 0 }, // calibration to "neutral" exchange colour space
                                     //    -> improve colour calibration of colorin and reproductibility
                                     //    of further edits (styles etc.)
@@ -559,8 +559,6 @@ const dt_iop_order_entry_t v50_jpg_order[] = {
   { { 28.0f }, "bilateral", 0},
   { { 28.0f }, "rotatepixels", 0},
   { { 28.0f }, "scalepixels", 0},
-  { { 28.0f }, "deflicker", 0},
-  
   { { 28.0f }, "lens", 0},
   { { 28.0f }, "cacorrectrgb", 0}, // correct chromatic aberrations after lens correction so that lensfun
                                   // does not reintroduce chromatic aberrations when trying to correct them
@@ -591,6 +589,7 @@ const dt_iop_order_entry_t v50_jpg_order[] = {
   { { 28.5f }, "primaries", 0},
   { { 29.0f }, "nlmeans", 0 },      // signal processing (denoising)
                                     //    -> needs a signal as scene-referred as possible (even if it works in Lab)
+  { { 29.5f }, "deflicker", 0},
   { { 30.0f }, "colorchecker", 0 }, // calibration to "neutral" exchange colour space
                                     //    -> improve colour calibration of colorin and reproductibility
                                     //    of further edits (styles etc.)
