@@ -48,13 +48,13 @@ typedef enum dt_iop_deflicker_orientation_t
 typedef struct dt_iop_deflicker_params_t
 {
   dt_iop_deflicker_orientation_t orientation; // $DEFAULT: ORIENTATION_HORIZONTAL
-  float offset;           // $MIN: 0.0 $MAX: 10000.0 $DEFAULT: 0.0 $DESCRIPTION: "offset" Position of first line in pixels
-  float period;           // $MIN: 1.0 $MAX: 5000.0 $DEFAULT: 100.0 $DESCRIPTION: "period" Distance between lines in pixels
-  float width;            // $MIN: 1.0 $MAX: 1000.0 $DEFAULT: 20.0 $DESCRIPTION: "band width" Width of underexposed band in pixels
+  float offset;           // $MIN: 0.0 $MAX: 10000.0 $DEFAULT: 50.0 $DESCRIPTION: "offset" Position of first line in pixels
+  float period;           // $MIN: 1.0 $MAX: 2000.0 $DEFAULT: 100.0 $DESCRIPTION: "period" Distance between lines in pixels
+  float width;            // $MIN: 1.0 $MAX: 1500.0 $DEFAULT: 10.0 $DESCRIPTION: "band width" Width of underexposed band in pixels
   float feather_start;    // $MIN: 0.0 $MAX: 500.0 $DEFAULT: 10.0 $DESCRIPTION: "feather start" Feathering on leading edge in pixels
   float feather_end;      // $MIN: 0.0 $MAX: 500.0 $DEFAULT: 10.0 $DESCRIPTION: "feather end" Feathering on trailing edge in pixels
   float brightness;       // $MIN: -2.0 $MAX: 4.0 $DEFAULT: 0.5 $DESCRIPTION: "brightness" Exposure compensation in EV
-  gboolean invert;        // $DEFAULT: FALSE $DESCRIPTION: "invert" Apply correction to bright bands instead
+  gboolean invert;        // $DEFAULT: FALSE $DESCRIPTION: "hide guides" Hide the guides to better see brightnesadjustment or finetuning
   gboolean unbound;       // $DEFAULT: TRUE $DESCRIPTION: "unbound" Allow values beyond [0,1]
 } dt_iop_deflicker_params_t;
 
@@ -150,7 +150,7 @@ static inline float calculate_weight(const float pos,
   //const float band_end = period * 0.5f + half_width + feather_end;
   
   // Distance from band center
-  float dist_from_center = phase - period * 0.5f;
+  float dist_from_center = phase;
   if(dist_from_center < 0.0f) dist_from_center += period;
   if(dist_from_center > period * 0.5f) dist_from_center -= period;
   dist_from_center = fabsf(dist_from_center);
@@ -200,7 +200,6 @@ void process(dt_iop_module_t *self,
   
   // Convert brightness from EV to linear multiplier
   const float brightness_mult = powf(2.0f, data->brightness);
-  const gboolean invert = data->invert;
 
   DT_OMP_FOR()
   for(int j = 0; j < roi_out->height; j++)
@@ -222,8 +221,6 @@ void process(dt_iop_module_t *self,
       // Calculate correction weight
       float weight = calculate_weight(pos, offset_px, period_px, width_px,
                                      feather_start_px, feather_end_px);
-      
-      if(invert) weight = 1.0f - weight;
       
       // Apply correction
       dt_aligned_pixel_t col;
@@ -342,21 +339,17 @@ void gui_post_expose(dt_iop_module_t *self,
                      const float zoom_scale)
 {
   dt_iop_deflicker_params_t *p = self->params;
+  const gboolean invert = p->invert;
+  if (invert) return; // no guides if invert is checked
   
-  // Get the full pipeline image dimensions (handles orientation correctly)
+  // Get the processing pipeline dimensions at this module
   dt_dev_pixelpipe_iop_t *piece = dt_dev_distort_get_iop_pipe(self->dev, self->dev->preview_pipe, self);
   if(!piece) return;
-  
-  const dt_iop_roi_t *buf_in = &piece->buf_in;
-  const int img_width = buf_in->width;
-  const int img_height = buf_in->height;
-  
-  const gboolean horizontal = (p->orientation == ORIENTATION_HORIZONTAL);
-  
-  // Scale from full image pixels to preview display
-  // wd and ht are preview dimensions, img_width/height are full pipeline dimensions
-  const float scale = horizontal ? (ht / (float)img_height) : (wd / (float)img_width);
-  
+    
+  const gboolean horizontal_in_preview = (p->orientation == ORIENTATION_HORIZONTAL);
+    
+  // Scale from pipeline pixels to preview display pixels
+  const float scale = 1 / piece->pipe->iscale;
   const float offset_display = p->offset * scale;
   const float period_display = p->period * scale;
   const float width_display = p->width * scale;
@@ -365,11 +358,11 @@ void gui_post_expose(dt_iop_module_t *self,
   
   cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0) / zoom_scale);
   
-  // Draw up to 50 bands visible on screen
-  const float display_dimension = horizontal ? ht : wd;
+  // Draw up to 60 bands visible on screen
+  const float display_dimension = horizontal_in_preview ? ht : wd;
   const int max_bands = (period_display > 0.0f) ? (int)((display_dimension / period_display) + 2) : 0;
   
-  for(int band = 0; band < MIN(max_bands, 50); band++)
+  for(int band = - MIN(max_bands, 30); band < MIN(max_bands, 30); band++)
   {
     // Band center position
     const float band_center = offset_display + band * period_display;
@@ -386,9 +379,9 @@ void gui_post_expose(dt_iop_module_t *self,
     if(band_outer_end < 0) continue;
     
     // Draw center line (solid, bright) - this is where offset points
-    cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(2.0) / zoom_scale);
-    dt_draw_set_color_overlay(cr, TRUE, 1.0);
-    if(horizontal)
+    cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0) / zoom_scale);
+    dt_draw_set_color_overlay(cr, TRUE, 0.3);
+    if(horizontal_in_preview)
     {
       cairo_move_to(cr, 0, band_center);
       cairo_line_to(cr, wd, band_center);
@@ -400,10 +393,13 @@ void gui_post_expose(dt_iop_module_t *self,
     }
     cairo_stroke(cr);
     
+    
     // Draw inner band boundaries (solid, medium) - width extends from center
     cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0) / zoom_scale);
+    double dashes = 10.0 / zoom_scale;
+    cairo_set_dash(cr, &dashes, 1, 0);
     dt_draw_set_color_overlay(cr, TRUE, 0.7);
-    if(horizontal)
+    if(horizontal_in_preview)
     {
       cairo_move_to(cr, 0, band_inner_start);
       cairo_line_to(cr, wd, band_inner_start);
@@ -420,11 +416,11 @@ void gui_post_expose(dt_iop_module_t *self,
     cairo_stroke(cr);
     
     // Draw feather boundaries (dashed)
-    dt_draw_set_color_overlay(cr, FALSE, 0.5);
-    double dashes[] = {4.0 / zoom_scale, 4.0 / zoom_scale};
-    cairo_set_dash(cr, dashes, 2, 0);
+    dt_draw_set_color_overlay(cr, TRUE, 0.4);
+    double dashess[] = {10.0 / zoom_scale, 20.0 / zoom_scale}; // dashes = 20.0 / zoom_scale; // 
+    cairo_set_dash(cr, dashess, 2, 0);
     
-    if(horizontal)
+    if(horizontal_in_preview)
     {
       cairo_move_to(cr, 0, band_outer_start);
       cairo_line_to(cr, wd, band_outer_start);
@@ -453,31 +449,32 @@ int mouse_moved(dt_iop_module_t *self,
   dt_iop_deflicker_gui_data_t *g = self->gui_data;
   dt_iop_deflicker_params_t *p = self->params;
   
-  // Get the full pipeline image dimensions (handles orientation)
+  // Get the processing pipeline dimensions
   dt_dev_pixelpipe_iop_t *piece = dt_dev_distort_get_iop_pipe(self->dev, self->dev->preview_pipe, self);
   if(!piece) return 0;
   
   const dt_iop_roi_t *buf_in = &piece->buf_in;
-  const int img_width = buf_in->width;
-  const int img_height = buf_in->height;
   
   const gboolean horizontal = (p->orientation == ORIENTATION_HORIZONTAL);
   
-  // Convert normalized coordinates [0,1] to full image pixels
-  const float pos_full = horizontal ? (pzy * img_height) : (pzx * img_width);
+  // Convert normalized preview coordinates to processing pixels
+  // pzx, pzy are in [0,1] normalized to the PREVIEW window
+  // We need to map to processing coordinates
+  const float scale = piece->pipe->iscale;
+  const float pos_full = horizontal ? (pzy * buf_in->height * scale) : (pzx * buf_in->width * scale);
   
   if(darktable.control->button_down && darktable.control->button_down_which == GDK_BUTTON_PRIMARY)
   {
     if(g->dragging == 1)
     {
-      // Dragging to set offset (in full image pixels)
+      // Dragging to set offset
       dt_bauhaus_slider_set(g->offset, pos_full);
       dt_control_queue_redraw_center();
       return 1;
     }
     else if(g->dragging == 2)
     {
-      // Dragging to measure period (in full image pixels)
+      // Dragging to measure period
       const float distance = fabsf(pos_full - g->click_pos);
       dt_bauhaus_slider_set(g->period, distance);
       dt_control_queue_redraw_center();
@@ -502,19 +499,19 @@ int button_pressed(dt_iop_module_t *self,
     dt_iop_deflicker_gui_data_t *g = self->gui_data;
     dt_iop_deflicker_params_t *p = self->params;
     
-    // Get the full pipeline image dimensions (handles orientation)
+    // Get processing dimensions
     dt_dev_pixelpipe_iop_t *piece = dt_dev_distort_get_iop_pipe(self->dev, self->dev->preview_pipe, self);
     if(!piece) return 0;
     
     const dt_iop_roi_t *buf_in = &piece->buf_in;
-    const int img_width = buf_in->width;
-    const int img_height = buf_in->height;
     
     const gboolean horizontal = (p->orientation == ORIENTATION_HORIZONTAL);
     
-    // Convert normalized coordinates [0,1] to full image pixels
-    const float pos_full = horizontal ? (pzy * img_height) : (pzx * img_width);
-    
+    // Convert normalized coordinates to processing pixels
+    // We need to map to processing coordinates
+    const float scale = piece->pipe->iscale;
+    const float pos_full = horizontal ? (pzy * buf_in->height * scale) : (pzx * buf_in->width * scale);
+  
     if(state & GDK_SHIFT_MASK)
     {
       // Shift+Click: Measure period from this point
@@ -525,9 +522,9 @@ int button_pressed(dt_iop_module_t *self,
     {
       // Normal click: Set offset to clicked position
       g->dragging = 1;
-      dt_bauhaus_slider_set(g->offset, pos_full);
-      dt_control_queue_redraw_center();
     }
+    dt_bauhaus_slider_set(g->offset, pos_full);
+    dt_control_queue_redraw_center();
     return 1;
   }
   return 0;
@@ -546,6 +543,37 @@ int button_released(dt_iop_module_t *self,
     g->dragging = 0;
     return 1;
   }
+  return 0;
+}
+
+int scrolled(dt_iop_module_t *self,
+             const float pzx,
+             const float pzy,
+             const int up,
+             const uint32_t state)
+{
+  dt_iop_deflicker_gui_data_t *g = self->gui_data;
+  dt_iop_deflicker_params_t *p = self->params;
+  
+  // Scroll to adjust bandwidth
+  if(state == GDK_CONTROL_MASK) // No modifiers
+  {
+    const float step = up ? 1.0f : -1.0f;
+    const float new_width = CLAMP(p->width + step, 1.0f, 1000.0f);
+    dt_bauhaus_slider_set(g->width, new_width);
+    dt_control_queue_redraw_center();
+    return 1;
+  } else if(state == GDK_SHIFT_MASK) // No modifiers
+  {
+    const float step = up ? 1.0f : -1.0f;
+    const float new_feather_start = CLAMP(p->feather_start + step, 1.0f, 1000.0f);
+    dt_bauhaus_slider_set(g->feather_start, new_feather_start);
+    const float new_feather_end = CLAMP(p->feather_end + step, 1.0f, 1000.0f);
+    dt_bauhaus_slider_set(g->feather_end, new_feather_end);
+    dt_control_queue_redraw_center();
+    return 1;
+  }
+  
   return 0;
 }
 
@@ -607,14 +635,14 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_digits(g->period, 1);
   dt_bauhaus_slider_set_step(g->period, 1.0);
   gtk_widget_set_tooltip_text(g->period, 
-    _("distance between band centers in pixels\nShift+drag from center to center to measure"));
+    _("distance between band centers in pixels\nShift+drag from first to last band, set number of bands below"));
   
   g->width = dt_bauhaus_slider_from_params(self, "width");
   dt_bauhaus_slider_set_format(g->width, " px");
   dt_bauhaus_slider_set_digits(g->width, 1);
   dt_bauhaus_slider_set_step(g->width, 1.0);
   gtk_widget_set_tooltip_text(g->width, 
-    _("full width of band (extends width/2 on each side of center)"));
+    _("full width of band (extends width/2 on each side of center)\nuse mouse scroll to adjust"));
   
   gtk_box_pack_start(GTK_BOX(self->widget),
                      dt_ui_section_label_new(C_("section", "blending (pixels)")),
@@ -652,10 +680,14 @@ void gui_init(dt_iop_module_t *self)
 GSList *mouse_actions(dt_iop_module_t *self)
 {
   GSList *lm = NULL;
-  lm = dt_mouse_action_create_format(lm, DT_MOUSE_ACTION_LEFT, 0,
+  lm = dt_mouse_action_create_format(lm, DT_MOUSE_ACTION_LEFT, GDK_CONTROL_MASK,
     _("[%s] set offset to clicked position"), self->name());
   lm = dt_mouse_action_create_format(lm, DT_MOUSE_ACTION_LEFT_DRAG, GDK_SHIFT_MASK,
-    _("[%s] measure period between bands"), self->name());
+    _("[%s] set offset and measure period between bands"), self->name());
+  lm = dt_mouse_action_create_format(lm, DT_MOUSE_ACTION_SCROLL, GDK_CONTROL_MASK,
+    _("[%s] adjust band width"), self->name());
+  lm = dt_mouse_action_create_format(lm, DT_MOUSE_ACTION_SCROLL, GDK_SHIFT_MASK,
+    _("[%s] adjust feather width"), self->name());
   return lm;
 }
 

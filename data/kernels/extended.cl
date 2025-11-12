@@ -1104,7 +1104,7 @@ static inline float calculate_weight_cl(const float pos,
   if(phase < 0.0f) phase += period;
   
   // Distance from band center
-  float dist_from_center = phase - period * 0.5f;
+  float dist_from_center = phase;
   if(dist_from_center < 0.0f) dist_from_center += period;
   if(dist_from_center > period * 0.5f) dist_from_center -= period;
   dist_from_center = fabs(dist_from_center);
@@ -1163,7 +1163,7 @@ kernel void deflicker(
   float weight = calculate_weight_cl(pos, offset_px, period_px, width_px,
                                     feather_start_px, feather_end_px);
   
-  if(invert) weight = 1.0f - weight;
+  // if(invert) weight = 1.0f - weight;
   
   // Read input pixel
   float4 pixel = read_imagef(in, sampleri, (int2)(x, y));
