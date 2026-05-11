@@ -135,7 +135,8 @@ static inline float calculate_weight(const float pos,
                                      const float period,
                                      const float width,
                                      const float feather_start,
-                                     const float feather_end)
+                                     const float feather_end,
+                                     const gboolean linear)
 {
   if(period <= 0.0f || width <= 0.0f) return 0.0f;
   
@@ -168,7 +169,12 @@ static inline float calculate_weight(const float pos,
     // In feathering zone - use cosine falloff
     const float feather_pos = abs_dist - half_width;
     const float t = feather_pos / feather;  // 0 to 1
-    weight = 0.5f * (1.0f + cosf(t * M_PI));  // Smooth cosine falloff
+    if (linear) {
+      weight = t;
+    } else {
+      weight = 0.5f * (1.0f + cosf(t * M_PI));  // Smooth cosine falloff
+    }
+    
   }
   
   return CLAMP(weight, 0.0f, 1.0f);
@@ -195,6 +201,7 @@ void process(dt_iop_module_t *self,
   const float width_px = data->width;
   const float feather_start_px = data->feather_start;
   const float feather_end_px = data->feather_end;
+  const gboolean linear = true;
   
   // Convert brightness from EV to linear multiplier
   const float brightness_mult = powf(2.0f, data->brightness);
@@ -218,7 +225,7 @@ void process(dt_iop_module_t *self,
       
       // Calculate correction weight
       float weight = calculate_weight(pos, offset_px, period_px, width_px,
-                                     feather_start_px, feather_end_px);
+                                     feather_start_px, feather_end_px, linear);
       
       // Apply correction
       dt_aligned_pixel_t col;
@@ -261,6 +268,7 @@ int process_cl(dt_iop_module_t *self,
   const float feather_start_px = data->feather_start;
   const float feather_end_px = data->feather_end;
   const float brightness_mult = powf(2.0f, data->brightness);
+  const int linear = 1;
   
   const int orientation = data->orientation;
   const int invert = data->invert;
@@ -272,7 +280,7 @@ int process_cl(dt_iop_module_t *self,
   return dt_opencl_enqueue_kernel_2d_args(devid, gd->kernel_deflicker, width, height,
     CLARG(dev_in), CLARG(dev_out), CLARG(width), CLARG(height),
     CLARG(orientation), CLARG(offset_px), CLARG(period_px), CLARG(width_px),
-    CLARG(feather_start_px), CLARG(feather_end_px), CLARG(brightness_mult),
+    CLARG(feather_start_px), CLARG(feather_end_px), CLARG(brightness_mult), CLARG(linear),
     CLARG(invert), CLARG(unbound), CLARG(scale), CLARG(roi_x), CLARG(roi_y));
 }
 #endif

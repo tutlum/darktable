@@ -1095,7 +1095,8 @@ static inline float calculate_weight_cl(const float pos,
                                         const float period,
                                         const float width,
                                         const float feather_start,
-                                        const float feather_end)
+                                        const float feather_end,
+                                        const gboolean linear)
 {
   if(period <= 0.0f || width <= 0.0f) return 0.0f;
   
@@ -1126,7 +1127,11 @@ static inline float calculate_weight_cl(const float pos,
   {
     const float feather_pos = abs_dist - half_width;
     const float t = feather_pos / feather;
-    weight = 0.5f * (1.0f + cos(t * M_PI));  // Cosine falloff
+    if (linear) {
+      weight = t;
+    } else {
+      weight = 0.5f * (1.0f + cosf(t * M_PI));  // Smooth cosine falloff
+    }
   }
   
   return clamp(weight, 0.0f, 1.0f);
@@ -1144,6 +1149,7 @@ kernel void deflicker(
   const float feather_start_px,
   const float feather_end_px,
   const float brightness_mult,
+  const int linear,
   const int invert,
   const int unbound,
   const float scale,
@@ -1164,7 +1170,7 @@ kernel void deflicker(
   
   // Calculate correction weight
   float weight = calculate_weight_cl(pos, offset_px, period_px, width_px,
-                                    feather_start_px, feather_end_px);
+                                    feather_start_px, feather_end_px, linear);
   
   // if(invert) weight = 1.0f - weight;
   
